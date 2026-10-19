@@ -1,0 +1,6 @@
+fastapi>=0.100
+uvicorn>=0.20
+biopython>=1.80
+primer3-py>=2.0
+sgffp @ git+https://github.com/merv1n34k/sgffp.git
+python-multipart>=0.0.5

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+uploads/
+results/
+test_oracle.*
+inputs.txt
+outputs.txt
+.venv/

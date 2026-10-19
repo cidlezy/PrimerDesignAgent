@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Primer Design Agent</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: #f5f6f8; color: #1a1a2e; min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem;
+    }
+    .container { max-width: 860px; width: 100%; }
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .subtitle { font-size: 0.85rem; color: #666; margin-bottom: 1.5rem; }
+    .card {
+      background: #fff; border: 1px solid #e0e0e6; border-radius: 8px;
+      padding: 1.25rem; margin-bottom: 1rem;
+    }
+    .card h2 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .row > * { flex: 1 1 200px; }
+    label { display: block; font-size: 0.8rem; font-weight: 500; color: #444; margin-bottom: 0.3rem; }
+    input[type=file], input[type=number], input[type=text], select {
+      width: 100%; padding: 0.45rem 0.6rem; font-size: 0.85rem;
+      border: 1px solid #ccc; border-radius: 5px; background: #fafafa;
+    }
+    input[type=file] { padding: 0.35rem; }
+    .method-toggle { display: flex; gap: 0; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
+    .method-toggle button {
+      flex: 1; padding: 0.55rem 0; font-size: 0.85rem; font-weight: 500;
+      border: none; background: #f0f0f0; color: #555; cursor: pointer;
+    }
+    .method-toggle button.active { background: #2563eb; color: #fff; }
+    .enzyme-row { display: flex; gap: 0.75rem; align-items: flex-end; }
+    .enzyme-row > div { flex: 1; }
+    button.primary {
+      width: 100%; padding: 0.65rem; font-size: 0.95rem; font-weight: 600;
+      background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer;
+    }
+    button.primary:hover { background: #1d4ed8; }
+    button.primary:disabled { background: #93c5fd; cursor: not-allowed; }
+    .results { display: none; }
+    .results.visible { display: block; }
+    .primer-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 1rem; margin-bottom: 0.75rem; }
+    .primer-card .name { font-weight: 600; font-size: 0.9rem; }
+    .primer-card .seq {
+      font-family: monospace; font-size: 0.8rem; letter-spacing: 0.5px;
+      word-break: break-all; background: #fff; padding: 0.5rem; border-radius: 4px;
+      border: 1px solid #e5e7eb; margin: 0.4rem 0;
+    }
+    .primer-card .tail { color: #d97706; }
+    .primer-card .anneal { color: #16a34a; }
+    .meta { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.78rem; color: #555; }
+    .meta span { background: #e8eaf0; padding: 0.2rem 0.5rem; border-radius: 4px; }
+    .warning { background: #fef3cd; border: 1px solid #fde047; border-radius: 6px; padding: 0.75rem 1rem; font-size: 0.82rem; margin-bottom: 0.75rem; }
+    .file-info { font-size: 0.78rem; color: #16a34a; margin-top: 0.3rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    th, td { padding: 0.35rem 0.5rem; border-bottom: 1px solid #e5e7eb; text-align: left; }
+    th { font-weight: 600; color: #555; }
+    .hidden { display: none; }
+    .error { background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; padding: 0.75rem 1rem; border-radius: 6px; font-size: 0.82rem; margin-bottom: 0.75rem; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Primer Design Agent</h1>
+  <p class="subtitle">上传基因和载体序列，选择克隆方式，自动设计引物并生成 SnapGene 兼容文件。</p>
+
+  <div class="card" id="uploadCard">
+    <h2>1. 上传序列文件</h2>
+    <div class="row">
+      <div>
+        <label for="geneFile">基因序列 (.dna / .gb / .fasta)</label>
+        <input type="file" id="geneFile" accept=".dna,.gb,.gbk,.fasta,.fa,.fna">
+        <div class="file-info" id="geneInfo"></div>
+        <div id="existingPrimers" class="hidden" style="margin-top: 0.5rem;"></div>
+      </div>
+      <div>
+        <label for="vectorFile">载体序列 (.dna / .gb / .fasta)</label>
+        <input type="file" id="vectorFile" accept=".dna,.gb,.gbk,.fasta,.fa,.fna">
+        <div class="file-info" id="vectorInfo"></div>
+      </div>
+    </div>
+    <button class="primary" id="btnUpload" style="margin-top: 0.75rem;">解析文件</button>
+  </div>
+
+  <div class="card hidden" id="paramCard">
+    <h2>2. 设计参数</h2>
+    <label>克隆方式</label>
+    <div class="method-toggle">
+      <button class="active" data-method="restriction">双酶切</button>
+      <button data-method="gibson">同源重组</button>
+    </div>
+
+    <div id="restrictionPanel" style="margin-top: 0.75rem;">
+      <div id="filteredNotice" class="hidden"></div>
+      <div class="enzyme-row">
+        <div>
+          <label for="enzymeF">5 端酶 (Forward)</label>
+          <select id="enzymeF"></select>
+        </div>
+        <div>
+          <label for="enzymeR">3 端酶 (Reverse)</label>
+          <select id="enzymeR"></select>
+        </div>
+        <div>
+          <label for="protectiveSeq">自动保护碱基 (Forward / Reverse)</label>
+          <input type="text" id="protectiveSeq" readonly>
+        </div>
+      </div>
+    </div>
+
+    <div id="gibsonPanel" class="hidden" style="margin-top: 0.75rem;">
+      <div class="row">
+        <div>
+          <label for="insertPos">插入位置 (载体上 1-based)</label>
+          <input type="number" id="insertPos" min="1" placeholder="如 235">
+        </div>
+        <div>
+          <label for="homologyLen">同源臂长度 (bp)</label>
+          <input type="number" id="homologyLen" value="20" min="15" max="40">
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top: 0.75rem;">
+      <label for="insertSource">插入片段</label>
+      <div style="font-size: 0.72rem; color: #888; margin-bottom: 0.3rem;">
+        选择从基因文件中取哪一段作为要克隆到载体的序列。如果基因文件只包含目的基因本身，选"整条基因序列"即可。
+      </div>
+      <select id="insertSource">
+        <option value="entire">整条基因序列</option>
+      </select>
+    </div>
+
+    <div class="row" style="margin-top: 0.75rem;">
+      <div>
+        <label for="targetTm">目标 Tm (C)</label>
+        <input type="number" id="targetTm" value="60" min="45" max="72">
+      </div>
+      <div>
+        <label for="maxDtm">最大 Tm 差 (C)</label>
+        <input type="number" id="maxDtm" value="2" min="0" max="10">
+      </div>
+      <div>
+        <label for="minLen">最短引物 (bp)</label>
+        <input type="number" id="minLen" value="18" min="14" max="30">
+      </div>
+      <div>
+        <label for="maxLen">最长引物 (bp)</label>
+        <input type="number" id="maxLen" value="36" min="20" max="36">
+      </div>
+    </div>
+
+    <button class="primary" id="btnDesign" style="margin-top: 1rem;">设计引物</button>
+  </div>
+
+  <div class="results" id="resultArea">
+    <div class="card">
+      <h2>结果</h2>
+      <div id="errorBox" class="error hidden"></div>
+      <div id="warningBox"></div>
+      <div id="bestPair"></div>
+      <div id="altTable"></div>
+      <div id="adviceBox" style="margin-top: 1rem;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let geneData = null, vectorData = null, method = "restriction";
+let enzymeDetails = {};
+
+document.querySelectorAll('.method-toggle button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.method-toggle button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    method = btn.dataset.method;
+    document.getElementById('restrictionPanel').classList.toggle('hidden', method !== 'restriction');
+    document.getElementById('gibsonPanel').classList.toggle('hidden', method !== 'gibson');
+  });
+});
+
+document.getElementById('btnUpload').addEventListener('click', async () => {
+  const gf = document.getElementById('geneFile').files[0];
+  const vf = document.getElementById('vectorFile').files[0];
+  if (!gf || !vf) { alert('请选择基因和载体文件'); return; }
+  const fd = new FormData();
+  fd.append('gene_file', gf);
+  fd.append('vector_file', vf);
+  const res = await fetch('/api/upload', { method: 'POST', body: fd });
+  const data = await res.json();
+  if (!res.ok) { alert(data.detail || '上传失败'); return; }
+  geneData = data.gene;
+  vectorData = data.vector;
+  enzymeDetails = {};
+  data.enzyme_details.forEach(e => { enzymeDetails[e.name] = e; });
+  document.getElementById('geneInfo').textContent = data.gene.name + ' (' + data.gene.length + ' bp, ' + data.gene.topology + ')';
+  document.getElementById('vectorInfo').textContent = data.vector.name + ' (' + data.vector.length + ' bp, ' + data.vector.topology + ')';
+
+  // Show existing primers from SnapGene file
+  const existingP = data.gene.primers_found || [];
+  const pEl = document.getElementById('existingPrimers');
+  if (existingP.length > 0) {
+    let ph = '<div style="font-size:0.72rem;color:#555;font-weight:600;">检测到文件中已有引物 (' + existingP.length + ' 条)：</div>';
+    existingP.forEach(p => {
+      const tmStr = p.tm ? ' Tm ' + p.tm + 'C' : '';
+      ph += '<div style="font-size:0.7rem;color:#666;font-family:monospace;margin-top:0.15rem;">' + p.name + ': ' + (p.sequence ? p.sequence.substring(0, 40) : '(序列未读出)') + '...' + tmStr + '</div>';
+    });
+    pEl.innerHTML = ph;
+    pEl.classList.remove('hidden');
+  } else {
+    pEl.classList.add('hidden');
+  }
+
+  const eF = document.getElementById('enzymeF'), eR = document.getElementById('enzymeR');
+  const allEnzymes = data.enzymes;
+
+  function populateEnzymes() {
+    const fVal = eF.value || (allEnzymes.length > 0 ? allEnzymes[0] : '');
+    const rOld = eR.options[eR.selectedIndex] ? eR.options[eR.selectedIndex].value : '';
+    eF.innerHTML = ''; eR.innerHTML = '';
+    allEnzymes.forEach(e => {
+      const ps = enzymeDetails[e].protective_sequence;
+      const label = e + ' [' + ps + ']';
+      eF.innerHTML += '<option value="' + e + '">' + label + '</option>';
+      if (e !== fVal) {
+        eR.innerHTML += '<option value="' + e + '">' + label + '</option>';
+      }
+    });
+    if (fVal && Array.from(eF.options).some(o => o.value === fVal)) eF.value = fVal;
+    if (rOld && rOld !== fVal && Array.from(eR.options).some(o => o.value === rOld)) {
+      eR.value = rOld;
+    } else {
+      const firstOther = Array.from(eR.options).find(o => o.value !== fVal);
+      if (firstOther) eR.value = firstOther.value;
+    }
+  }
+
+  populateEnzymes();
+
+  eF.addEventListener('change', () => {
+    populateEnzymes();
+    updateProtective();
+  });
+
+  eR.addEventListener('change', () => {
+    updateProtective();
+  });
+
+  const sel = document.getElementById('insertSource');
+  sel.innerHTML = '<option value="entire">整条基因序列</option>';
+  data.gene.features.forEach(f => {
+    sel.innerHTML += '<option value="feature:' + f.name + '">' + f.name + ' (' + f.type + ')</option>';
+  });
+
+  // Show filtered enzymes notice
+  const filtered = data.enzymes_filtered;
+  const filteredNames = Object.keys(filtered);
+  const notInVector = data.enzymes_not_in_vector || [];
+  const noticeEl = document.getElementById('filteredNotice');
+  if (filteredNames.length > 0 || notInVector.length > 0) {
+    let html = '';
+    if (filteredNames.length > 0) {
+      const items = filteredNames.map(n => n + ' (' + filtered[n].count + ' 个位点)').join('、');
+      html += '<div>在目的基因内部有酶切位点：<b>' + items + '</b></div>';
+    }
+    if (notInVector.length > 0) {
+      html += '<div style="margin-top:0.3rem;">载体上没有酶切位点：<b>' + notInVector.join('、') + '</b></div>';
+    }
+    html = '<div class="warning">以下酶已从下拉列表中隐藏：<br>' + html + '</div>';
+    noticeEl.innerHTML = html;
+    noticeEl.classList.remove('hidden');
+  } else {
+    noticeEl.classList.add('hidden');
+  }
+
+  function updateProtective() {
+    const ef = document.getElementById('enzymeF').value;
+    const er = document.getElementById('enzymeR').value;
+    const psF = enzymeDetails[ef] ? enzymeDetails[ef].protective_sequence : '';
+    const psR = enzymeDetails[er] ? enzymeDetails[er].protective_sequence : '';
+    document.getElementById('protectiveSeq').value = psF + ' / ' + psR;
+  }
+  updateProtective();
+
+  document.getElementById('paramCard').classList.remove('hidden');
+});
+
+document.getElementById('btnDesign').addEventListener('click', async () => {
+  const btn = document.getElementById('btnDesign');
+  btn.disabled = true; btn.textContent = '计算中...';
+  const body = {
+    gene_seq: geneData.sequence,
+    vector_seq: vectorData.sequence,
+    gene_features: geneData.features,
+    gene_length: geneData.length,
+    method: method,
+    insert_source: document.getElementById('insertSource').value,
+    insert_strand: '+',
+    enzymes: [document.getElementById('enzymeF').value, document.getElementById('enzymeR').value],
+    extra_5: 0,
+    vector_insert_pos: document.getElementById('insertPos').value ? parseInt(document.getElementById('insertPos').value) - 1 : null,
+    homology_len: parseInt(document.getElementById('homologyLen').value) || 20,
+    target_tm: parseFloat(document.getElementById('targetTm').value),
+    max_dtm: parseFloat(document.getElementById('maxDtm').value),
+    min_len: parseInt(document.getElementById('minLen').value),
+    max_len: parseInt(document.getElementById('maxLen').value),
+  };
+  const res = await fetch('/api/design', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  btn.disabled = false; btn.textContent = '设计引物';
+  if (!res.ok) {
+    const err = document.getElementById('errorBox');
+    err.textContent = data.detail || '设计失败';
+    err.classList.remove('hidden');
+    document.getElementById('resultArea').classList.add('visible');
+    return;
+  }
+  document.getElementById('errorBox').classList.add('hidden');
+  renderResult(data);
+  document.getElementById('resultArea').classList.add('visible');
+});
+
+function renderResult(d) {
+  const wb = document.getElementById('warningBox');
+  wb.innerHTML = d.warnings.map(w => '<div class="warning">' + w + '</div>').join('');
+
+  const b = d.best;
+  let html = '';
+  html += '<div class="primer-card">';
+  html += '<div class="name">Forward: ' + b.forward.name + '</div>';
+  html += '<div class="seq"><span class="tail">' + b.forward.tail + '</span><span class="anneal">' + b.forward.anneal + '</span></div>';
+  html += '<div class="meta"><span>Tm: ' + b.forward.tm + ' C</span><span>GC: ' + b.forward.gc + '%</span><span>退火段: ' + b.forward.anneal_length + ' nt</span><span>全长: ' + b.forward.length + ' nt</span></div>';
+  html += '</div>';
+  html += '<div class="primer-card">';
+  html += '<div class="name">Reverse: ' + b.reverse.name + '</div>';
+  html += '<div class="seq"><span class="tail">' + b.reverse.tail + '</span><span class="anneal">' + b.reverse.anneal + '</span></div>';
+  html += '<div class="meta"><span>Tm: ' + b.reverse.tm + ' C</span><span>GC: ' + b.reverse.gc + '%</span><span>退火段: ' + b.reverse.anneal_length + ' nt</span><span>全长: ' + b.reverse.length + ' nt</span></div>';
+  html += '</div>';
+  html += '<div class="meta" style="margin-bottom: 0.75rem;">';
+  html += '<span>Tm 差: ' + b.tm_difference + ' C</span><span>产物长度: ' + b.product_length + ' bp</span>';
+  html += '<span>Tm 标准: ' + d.tm_standard + '</span></div>';
+  if (b.checks) {
+    html += '<div style="font-size:0.75rem;color:#555;">Hairpin F: ' + b.checks.forward_hairpin_tm + 'C | Hairpin R: ' + b.checks.reverse_hairpin_tm + 'C | Dimer: ' + b.checks.pair_dimer_dg + ' kcal/mol</div>';
+  }
+  const gbName = d.output_gb_name;
+  const tsvName = d.output_tsv_name;
+  html += '<div style="margin-top:0.75rem;font-size:0.78rem;">';
+  html += '<a href="data:text/plain;base64,' + d.output_gb_b64 + '" download="' + gbName + '">' + gbName + '</a> | ';
+  html += '<a href="data:text/tab-separated-values;base64,' + d.output_tsv_b64 + '" download="' + tsvName + '">' + tsvName + '</a>';
+  html += '</div>';
+  document.getElementById('bestPair').innerHTML = html;
+
+  if (d.alternatives && d.alternatives.length > 0) {
+    let t = '<h3 style="font-size:0.85rem;margin:1rem 0 0.5rem;font-weight:600;">备选引物对</h3><table><tr><th>#</th><th>Forward</th><th>Tm</th><th>Reverse</th><th>Tm</th><th>DTm</th></tr>';
+    d.alternatives.forEach((a, i) => {
+      t += '<tr><td>' + (i + 2) + '</td><td style="font-family:monospace;font-size:0.72rem;">' + a.forward + '</td><td>' + a.tm_f + '</td><td style="font-family:monospace;font-size:0.72rem;">' + a.reverse + '</td><td>' + a.tm_r + '</td><td>' + a.dtm + '</td></tr>';
+    });
+    t += '</table>';
+    document.getElementById('altTable').innerHTML = t;
+  }
+
+  // PCR advice
+  const adv = d.pcr_advice;
+  if (adv && adv.advice && adv.advice.length > 0) {
+    let ah = '<div style="font-size:0.85rem;font-weight:600;margin-bottom:0.5rem;">扩增建议</div>';
+    ah += '<div style="font-size:0.78rem;color:#555;margin-bottom:0.5rem;">';
+    ah += '插入片段 GC: <b>' + adv.insert_gc_percent + '%</b> | 长度: <b>' + adv.insert_length + ' bp</b> | 推荐退火温度: <b>' + adv.recommended_anneal_c + ' °C</b>';
+    ah += '</div>';
+    ah += '<ul style="font-size:0.78rem;color:#444;padding-left:1.2rem;">';
+    adv.advice.forEach(a => { ah += '<li style="margin-bottom:0.3rem;">' + a + '</li>'; });
+    ah += '</ul>';
+    if (adv.flags && adv.flags.length > 0) {
+      const flagLabels = {high_gc: '高GC', low_gc: '低GC', tm_mismatch: 'Tm差值大', long_product: '长片段', short_product: '短片段', hairpin: '引物hairpin强', dimer: '引物dimer强', medium_product: '中等长度'};
+      const badges = adv.flags.map(f => '<span style="background:#dbeafe;color:#1e40af;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.7rem;margin-right:0.3rem;">' + (flagLabels[f] || f) + '</span>').join('');
+      ah = '<div style="margin-bottom:0.5rem;">' + badges + '</div>' + ah;
+    }
+    document.getElementById('adviceBox').innerHTML = ah;
+  } else {
+    document.getElementById('adviceBox').innerHTML = '';
+  }
+}
+</script>
+</body>
+</html>
